@@ -1,0 +1,82 @@
+name: grupo4-bigdata
+services:
+  generator:
+    image: python:3.12-slim
+    working_dir: /app
+    command: ["python", "-u", "/app/generator/gerador.py"]
+    environment:
+      EVENT_FILE: /data/events.jsonl
+      EVENT_INTERVAL_SECONDS: "1"
+    volumes: ["./:/app:ro", "events:/data"]
+    restart: unless-stopped
+  flume:
+    build: {context: ./flume}
+    command: ["/opt/flume/bin/flume-ng", "agent", "--conf", "/opt/flume/conf", "--conf-file", "/project/flume/flume-test.conf", "--name", "agent", "-Dflume.root.logger=INFO,console"]
+    volumes: ["./:/project:ro", "events:/data:ro", "flume-state:/state"]
+    depends_on: [generator]
+    restart: unless-stopped
+  namenode:
+    image: apache/hadoop:3.4.1
+    hostname: namenode
+    user: root
+    command: ["hdfs", "namenode"]
+    environment:
+      ENSURE_NAMENODE_DIR: /tmp/hadoop-hadoop/dfs/name
+      CORE-SITE.XML_fs.defaultFS: hdfs://namenode:8020
+      HDFS-SITE.XML_dfs.replication: "1"
+      HDFS-SITE.XML_dfs.namenode.name.dir: /tmp/hadoop-hadoop/dfs/name
+      HDFS-SITE.XML_dfs.namenode.rpc-address: namenode:8020
+      HDFS-SITE.XML_dfs.namenode.http-address: 0.0.0.0:9870
+    ports:
+      - "9870:9870"
+      - "8020:8020"
+    volumes:
+      - namenode-data:/tmp/hadoop-hadoop/dfs/name
+    restart: unless-stopped
+
+  datanode:
+    image: apache/hadoop:3.4.1
+    hostname: datanode
+    user: root
+    command: ["hdfs", "datanode"]
+    environment:
+      CORE-SITE.XML_fs.defaultFS: hdfs://namenode:8020
+      HDFS-SITE.XML_dfs.replication: "1"
+      HDFS-SITE.XML_dfs.datanode.data.dir: /tmp/hadoop-hadoop/dfs/data
+    depends_on:
+      - namenode
+    volumes:
+      - datanode-data:/tmp/hadoop-hadoop/dfs/data
+    restart: unless-stopped
+  flink-jobmanager:
+    image: flink:1.20.1-scala_2.12-java11
+    command: jobmanager
+    environment:
+      FLINK_PROPERTIES: "jobmanager.rpc.address: flink-jobmanager\n"
+    ports: ["8081:8081"]
+    restart: unless-stopped
+  flink-taskmanager:
+    image: flink:1.20.1-scala_2.12-java11
+    command: taskmanager
+    environment:
+      FLINK_PROPERTIES: "jobmanager.rpc.address: flink-jobmanager\ntaskmanager.numberOfTaskSlots: 2\n"
+    depends_on: [flink-jobmanager]
+    restart: unless-stopped
+  spark-master:
+    image: apache/spark:3.5.5
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master"]
+    ports: ["8080:8080", "7077:7077"]
+    restart: unless-stopped
+  spark-worker:
+    image: apache/spark:3.5.5
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "spark://spark-master:7077"]
+    environment:
+      SPARK_WORKER_CORES: "1"
+      SPARK_WORKER_MEMORY: 1g
+    depends_on: [spark-master]
+    restart: unless-stopped
+volumes:
+  events:
+  flume-state:
+  namenode-data:
+  datanode-data:
