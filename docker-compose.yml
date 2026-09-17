@@ -9,12 +9,14 @@ services:
       EVENT_INTERVAL_SECONDS: "1"
     volumes: ["./:/app:ro", "events:/data"]
     restart: unless-stopped
+
   flume:
     build: {context: ./flume}
     command: ["/opt/flume/bin/flume-ng", "agent", "--conf", "/opt/flume/conf", "--conf-file", "/project/flume/flume-test.conf", "--name", "agent", "-Dflume.root.logger=INFO,console"]
     volumes: ["./:/project:ro", "events:/data:ro", "flume-state:/state"]
     depends_on: [generator]
     restart: unless-stopped
+
   namenode:
     image: apache/hadoop:3.4.1
     hostname: namenode
@@ -34,6 +36,16 @@ services:
       - namenode-data:/tmp/hadoop-hadoop/dfs/name
     restart: unless-stopped
 
+  hbase:
+    image: harisekhon/hbase:2.1
+    hostname: hbase
+    ports:
+      - "16010:16010"
+      - "16000:16000"
+      - "16020:16020"
+      - "2181:2181"
+    restart: unless-stopped
+
   datanode:
     image: apache/hadoop:3.4.1
     hostname: datanode
@@ -48,25 +60,41 @@ services:
     volumes:
       - datanode-data:/tmp/hadoop-hadoop/dfs/data
     restart: unless-stopped
+
   flink-jobmanager:
-    image: flink:1.20.1-scala_2.12-java11
+    build:
+      context: ./flink
+      dockerfile: Dockerfile
     command: jobmanager
     environment:
       FLINK_PROPERTIES: "jobmanager.rpc.address: flink-jobmanager\n"
-    ports: ["8081:8081"]
+    ports:
+      - "8081:8081"
+    volumes:
+      - events:/data:ro
+      - ./flink:/opt/flink/jobs:ro
     restart: unless-stopped
+
   flink-taskmanager:
-    image: flink:1.20.1-scala_2.12-java11
+    build:
+      context: ./flink
+      dockerfile: Dockerfile
     command: taskmanager
     environment:
       FLINK_PROPERTIES: "jobmanager.rpc.address: flink-jobmanager\ntaskmanager.numberOfTaskSlots: 2\n"
-    depends_on: [flink-jobmanager]
+    depends_on:
+      - flink-jobmanager
+    volumes:
+      - events:/data:ro
+      - ./flink:/opt/flink/jobs:ro
     restart: unless-stopped
+
   spark-master:
     image: apache/spark:3.5.5
     command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master"]
     ports: ["8080:8080", "7077:7077"]
     restart: unless-stopped
+
   spark-worker:
     image: apache/spark:3.5.5
     command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "spark://spark-master:7077"]

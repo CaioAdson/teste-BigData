@@ -17,9 +17,12 @@ def parse(line):
     return event
 
 
-def timestamp(event, _record_timestamp):
-    return event["timestamp_ms"]
+from pyflink.common.watermark_strategy import TimestampAssigner
 
+
+class EventTimestampAssigner(TimestampAssigner):
+    def extract_timestamp(self, event, record_timestamp):
+        return event["timestamp_ms"]
 
 env = StreamExecutionEnvironment.get_execution_environment()
 env.set_parallelism(1)
@@ -28,7 +31,9 @@ source = FileSource.for_record_stream_format(
 ).monitor_continuously(Duration.of_seconds(2)).build()
 
 events = env.from_source(source, WatermarkStrategy.no_watermarks(), "json-file").map(parse)
-watermarks = WatermarkStrategy.for_bounded_out_of_orderness(Duration.of_seconds(10)).with_timestamp_assigner(timestamp)
+watermarks = WatermarkStrategy.for_bounded_out_of_orderness(
+    Duration.of_seconds(10)
+).with_timestamp_assigner(EventTimestampAssigner())
 
 alerts = (
     events.assign_timestamps_and_watermarks(watermarks)
